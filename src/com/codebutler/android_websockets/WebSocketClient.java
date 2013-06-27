@@ -41,6 +41,8 @@ public class WebSocketClient {
     
     private volatile boolean         mConnected;
 
+    private final Object             connectionLock = new Object();
+    
     private static volatile TrustManager[] sTrustManagers;
 
     public static void setTrustManagers(TrustManager[] tm) {
@@ -68,14 +70,16 @@ public class WebSocketClient {
 	}
 
     public void connect() {
-    	if (mHandlerThread != null && mHandlerThread.isAlive()) {
-        	Log.d(TAG, "WebSocket writing thread is existed.");
-            return;
-        }
-    	
-    	mHandlerThread = new HandlerThread(THREAD_NAME_WRITE);
-        mHandlerThread.start();
-        mHandler = new Handler(mHandlerThread.getLooper());
+    	synchronized (connectionLock) {
+	    	if (mHandlerThread != null && mHandlerThread.isAlive()) {
+	        	Log.d(TAG, "WebSocket writing thread is existed.");
+	            return;
+	        }
+	    	
+	    	mHandlerThread = new HandlerThread(THREAD_NAME_WRITE);
+	        mHandlerThread.start();
+	        mHandler = new Handler(mHandlerThread.getLooper());
+    	}
 
         mHandler.post(new Runnable() {
 			@Override
@@ -123,25 +127,30 @@ public class WebSocketClient {
     }
 
     public void disconnect() {
-        if (mHandlerThread != null && mHandlerThread.isAlive()) {
-            mHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    if (mSocket != null) {
-                        try {
-                            mSocket.close();
-                        } catch (IOException ex) {
-                            Log.d(TAG, "Error while disconnecting", ex);
-                            mListener.onError(ex);
-                        }
-                        mSocket = null;
+    	final HandlerThread handlerThread;
+    	synchronized (connectionLock) {
+    		if (mHandlerThread == null) {
+    			return;
+    		}
+    		handlerThread = mHandlerThread;
+        	mHandlerThread = null;
+    	}
+    	mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (mSocket != null) {
+                    try {
+                        mSocket.close();
+                    } catch (IOException ex) {
+                        Log.d(TAG, "Error while disconnecting", ex);
+                        mListener.onError(ex);
                     }
-                    mConnected = false;
-                    mHandlerThread.quit();
-                    mHandlerThread = null;
+                    mSocket = null;
                 }
-            });
-        }
+                mConnected = false;
+                handlerThread.quit();
+            }
+        });
     }
 
     public void send(String data) {
