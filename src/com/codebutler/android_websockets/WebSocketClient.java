@@ -27,6 +27,8 @@ import java.util.List;
 
 public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
+    private static final String THREAD_NAME_READ = "websocket-read-thread";
+    private static final String THREAD_NAME_WRITE = "websocket-write-thread";
 
     private final URI                      mURI;
     private final Listener                 mListener;
@@ -53,7 +55,7 @@ public class WebSocketClient {
         mConnected    = false;
         mParser       = new HybiParser(this);
 
-        mHandlerThread = new HandlerThread("websocket-thread");
+        mHandlerThread = new HandlerThread(THREAD_NAME_WRITE);
         mHandlerThread.start();
         mHandler = new Handler(mHandlerThread.getLooper());
     }
@@ -64,6 +66,7 @@ public class WebSocketClient {
 
     public void connect() {
         if (mThread != null && mThread.isAlive()) {
+        	Log.d(TAG, "WebSocket reading thread is existed.");
             return;
         }
 
@@ -141,7 +144,7 @@ public class WebSocketClient {
                     mListener.onError(ex);
                 }
             }
-        });
+        }, THREAD_NAME_READ);
         mThread.start();
     }
 
