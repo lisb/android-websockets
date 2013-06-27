@@ -28,14 +28,14 @@ import java.util.List;
 public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
 
-    private URI                      mURI;
-    private Listener                 mListener;
+    private final URI                      mURI;
+    private final Listener                 mListener;
     private Socket                   mSocket;
     private Thread                   mThread;
     private HandlerThread            mHandlerThread;
     private Handler                  mHandler;
-    private List<BasicNameValuePair> mExtraHeaders;
-    private HybiParser               mParser;
+    private final List<BasicNameValuePair> mExtraHeaders;
+    private final HybiParser               mParser;
     private boolean                  mConnected;
 
     private final Object mSendLock = new Object();
