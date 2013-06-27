@@ -1,5 +1,7 @@
 package com.codebutler.android_websockets;
 
+import static java.lang.System.currentTimeMillis;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
@@ -27,6 +29,7 @@ import android.util.Log;
 public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
     private static final String THREAD_NAME_WRITE = "websocket-write-thread";
+    private static final long HEARTBEAT_INTERVAL_MARGIN = 10;
 
     private final URI                      mURI;
     private final Listener                 mListener;
@@ -41,7 +44,12 @@ public class WebSocketClient {
     
     private volatile boolean         mConnected;
 
-    private final Object             connectionLock = new Object();
+    private final Object             mConnectionLock = new Object();
+
+    private final Runnable           mHeartbeat;
+    /** access from all thread */
+    private long                     mHeartbeatInterval;
+    private volatile long            mTimestamp; 
     
     private static volatile TrustManager[] sTrustManagers;
 
@@ -55,10 +63,22 @@ public class WebSocketClient {
         mExtraHeaders = extraHeaders;
         mConnected    = false;
         mParser       = new HybiParser(this);
+        mHeartbeat     = new HeartBeat();
     }
 
     public Listener getListener() {
         return mListener;
+    }
+    
+    public void setHeartbeatInterval(long heartbeatInterval) {
+    	synchronized (mHeartbeat) {
+    		this.mHeartbeatInterval = heartbeatInterval;
+    		postHeartbeat();
+		}
+	}
+    
+    void setTimestamp() {
+    	mTimestamp = currentTimeMillis();
     }
     
     Socket getSocket() {
@@ -68,9 +88,20 @@ public class WebSocketClient {
     void setConnected(boolean mConnected) {
 		this.mConnected = mConnected;
 	}
+    
+    void postHeartbeat() {
+    	synchronized (mHeartbeat) {
+    		if (mConnected) {
+    			mHandler.removeCallbacks(mHeartbeat);
+	    		if (mHeartbeatInterval > 0) {
+	    			mHandler.post(mHeartbeat);
+	    		}
+    		}
+		}
+    }
 
     public void connect() {
-    	synchronized (connectionLock) {
+    	synchronized (mConnectionLock) {
 	    	if (mHandlerThread != null && mHandlerThread.isAlive()) {
 	        	Log.d(TAG, "WebSocket writing thread is existed.");
 	            return;
@@ -111,7 +142,8 @@ public class WebSocketClient {
                     }
                     out.print("\r\n");
                     out.flush();
-		            
+
+                    setTimestamp();
                     new WebSocketReadThread(WebSocketClient.this).start();
 		        } catch (IOException ex) {
 		        	mListener.onError(ex);
@@ -128,7 +160,7 @@ public class WebSocketClient {
 
     public void disconnect() {
     	final HandlerThread handlerThread;
-    	synchronized (connectionLock) {
+    	synchronized (mConnectionLock) {
     		if (mHandlerThread == null) {
     			return;
     		}
@@ -186,11 +218,42 @@ public class WebSocketClient {
                     OutputStream outputStream = mSocket.getOutputStream();
                     outputStream.write(frame);
                     outputStream.flush();
+
+                    setTimestamp();
                 } catch (IOException e) {
                     mListener.onError(e);
                 }
             }
         });
+    }
+
+    private SSLSocketFactory getSSLSocketFactory() throws NoSuchAlgorithmException, KeyManagementException {
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, sTrustManagers, null);
+        return context.getSocketFactory();
+    }
+    
+    private class HeartBeat implements Runnable {
+    	
+		@Override
+		public void run() {
+			synchronized (this) {
+				if (mHeartbeatInterval <= 0 || !mConnected) {
+					return;
+				}
+				
+				mHandler.removeCallbacks(this); // 二重で登録してしまわないように削除．
+				final long dx = mTimestamp + mHeartbeatInterval - currentTimeMillis();
+				if (dx < HEARTBEAT_INTERVAL_MARGIN) {
+					mParser.ping("heartbeat");
+					setTimestamp();
+					mHandler.postDelayed(this, mHeartbeatInterval);
+				} else {
+					mHandler.postDelayed(this, dx);
+				}
+			}
+		}
+    	
     }
 
     public interface Listener {
@@ -199,11 +262,5 @@ public class WebSocketClient {
         public void onMessage(byte[] data);
         public void onDisconnect(int code, String reason);
         public void onError(Exception error);
-    }
-
-    private SSLSocketFactory getSSLSocketFactory() throws NoSuchAlgorithmException, KeyManagementException {
-        SSLContext context = SSLContext.getInstance("TLS");
-        context.init(null, sTrustManagers, null);
-        return context.getSocketFactory();
     }
 }

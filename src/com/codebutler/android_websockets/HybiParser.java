@@ -109,6 +109,7 @@ public class HybiParser {
             if (stream.available() == -1) break;
             switch (mStage) {
                 case 0:
+                	mClient.setTimestamp();
                     parseOpcode(stream.readByte());
                     break;
                 case 1:

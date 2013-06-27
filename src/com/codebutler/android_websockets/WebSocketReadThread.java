@@ -60,7 +60,7 @@ public class WebSocketReadThread extends Thread {
 			}
 
 			mClient.setConnected(true);
-			
+			mClient.postHeartbeat();
 			mClient.getListener().onConnect();
 
 			// Now decode websocket frames.
