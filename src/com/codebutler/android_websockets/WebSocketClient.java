@@ -17,6 +17,7 @@ import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.Socket;
@@ -32,17 +33,20 @@ public class WebSocketClient {
 
     private final URI                      mURI;
     private final Listener                 mListener;
+    private final List<BasicNameValuePair> mExtraHeaders;
+    
+    /** access on websocket-write-thread */
     private Socket                   mSocket;
-    private Thread                   mThread;
+    /** create on main thread, destroy on websocket-write-thread */
     private HandlerThread            mHandlerThread;
     private Handler                  mHandler;
-    private final List<BasicNameValuePair> mExtraHeaders;
+    
+    /** uses on websocket-read-thread */
     private final HybiParser               mParser;
-    private boolean                  mConnected;
+    
+    private volatile boolean                  mConnected;
 
-    private final Object mSendLock = new Object();
-
-    private static TrustManager[] sTrustManagers;
+    private static volatile TrustManager[] sTrustManagers;
 
     public static void setTrustManagers(TrustManager[] tm) {
         sTrustManagers = tm;
@@ -54,10 +58,6 @@ public class WebSocketClient {
         mExtraHeaders = extraHeaders;
         mConnected    = false;
         mParser       = new HybiParser(this);
-
-        mHandlerThread = new HandlerThread(THREAD_NAME_WRITE);
-        mHandlerThread.start();
-        mHandler = new Handler(mHandlerThread.getLooper());
     }
 
     public Listener getListener() {
@@ -65,28 +65,30 @@ public class WebSocketClient {
     }
 
     public void connect() {
-        if (mThread != null && mThread.isAlive()) {
-        	Log.d(TAG, "WebSocket reading thread is existed.");
+    	if (mHandlerThread != null && mHandlerThread.isAlive()) {
+        	Log.d(TAG, "WebSocket writing thread is existed.");
             return;
         }
+    	
+    	mHandlerThread = new HandlerThread(THREAD_NAME_WRITE);
+        mHandlerThread.start();
+        mHandler = new Handler(mHandlerThread.getLooper());
 
-        mThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    int port = (mURI.getPort() != -1) ? mURI.getPort() : ((mURI.getScheme().equals("wss") || mURI.getScheme().equals("https")) ? 443 : 80);
+        mHandler.post(new Runnable() {
+			@Override
+			public void run() {
+				try {
+		            int port = (mURI.getPort() != -1) ? mURI.getPort() : ((mURI.getScheme().equals("wss") || mURI.getScheme().equals("https")) ? 443 : 80);
 
-                    String path = TextUtils.isEmpty(mURI.getPath()) ? "/" : mURI.getPath();
-                    if (!TextUtils.isEmpty(mURI.getQuery())) {
-                        path += "?" + mURI.getQuery();
-                    }
+		            SocketFactory factory = (mURI.getScheme().equals("wss") || mURI.getScheme().equals("https")) ? getSSLSocketFactory() : SocketFactory.getDefault();
+		            mSocket = factory.createSocket(mURI.getHost(), port);
+		            String path = TextUtils.isEmpty(mURI.getPath()) ? "/" : mURI.getPath();
+ 		            if (!TextUtils.isEmpty(mURI.getQuery())) {
+ 		                path += "?" + mURI.getQuery();
+ 		            }
 
-                    String originScheme = mURI.getScheme().equals("wss") ? "https" : "http";
-                    URI origin = new URI(originScheme, "//" + mURI.getHost(), null);
-
-                    SocketFactory factory = (mURI.getScheme().equals("wss") || mURI.getScheme().equals("https")) ? getSSLSocketFactory() : SocketFactory.getDefault();
-                    mSocket = factory.createSocket(mURI.getHost(), port);
-
+ 		            String originScheme = mURI.getScheme().equals("wss") ? "https" : "http";
+ 		            URI origin = new URI(originScheme, "//" + mURI.getHost(), null);
                     PrintWriter out = new PrintWriter(mSocket.getOutputStream());
                     out.print("GET " + path + " HTTP/1.1\r\n");
                     out.print("Upgrade: websocket\r\n");
@@ -102,54 +104,74 @@ public class WebSocketClient {
                     }
                     out.print("\r\n");
                     out.flush();
+		            
+                    final InputStream socketInStream = mSocket.getInputStream();
+		            new Thread(new Runnable() {
+			            @Override
+			            public void run() {
+			            	Log.i(TAG, "start WebSocket reading thread.");
+			            	try {
+			                    HybiParser.HappyDataInputStream stream = new HybiParser.HappyDataInputStream(socketInStream);
 
-                    HybiParser.HappyDataInputStream stream = new HybiParser.HappyDataInputStream(mSocket.getInputStream());
+			                    // Read HTTP response status line.
+			                    StatusLine statusLine = parseStatusLine(readLine(stream));
+			                    if (statusLine == null) {
+			                        throw new HttpException("Received no reply from server.");
+			                    } else if (statusLine.getStatusCode() != HttpStatus.SC_SWITCHING_PROTOCOLS) {
+			                        throw new HttpResponseException(statusLine.getStatusCode(), statusLine.getReasonPhrase());
+			                    }
 
-                    // Read HTTP response status line.
-                    StatusLine statusLine = parseStatusLine(readLine(stream));
-                    if (statusLine == null) {
-                        throw new HttpException("Received no reply from server.");
-                    } else if (statusLine.getStatusCode() != HttpStatus.SC_SWITCHING_PROTOCOLS) {
-                        throw new HttpResponseException(statusLine.getStatusCode(), statusLine.getReasonPhrase());
-                    }
+			                    // Read HTTP response headers.
+			                    String line;
+			                    while (!TextUtils.isEmpty(line = readLine(stream))) {
+			                        Header header = parseHeader(line);
+			                        if (header.getName().equals("Sec-WebSocket-Accept")) {
+			                            // FIXME: Verify the response...
+			                        }
+			                    }
 
-                    // Read HTTP response headers.
-                    String line;
-                    while (!TextUtils.isEmpty(line = readLine(stream))) {
-                        Header header = parseHeader(line);
-                        if (header.getName().equals("Sec-WebSocket-Accept")) {
-                            // FIXME: Verify the response...
-                        }
-                    }
+			                    mListener.onConnect();
 
-                    mListener.onConnect();
+			                    mConnected = true;
 
-                    mConnected = true;
+			                    // Now decode websocket frames.
+			                    mParser.start(stream);
 
-                    // Now decode websocket frames.
-                    mParser.start(stream);
+			                } catch (EOFException ex) {
+			                    Log.d(TAG, "WebSocket EOF!", ex);
+			                    mListener.onDisconnect(0, "EOF");
+			                    mConnected = false;
 
-                } catch (EOFException ex) {
-                    Log.d(TAG, "WebSocket EOF!", ex);
-                    mListener.onDisconnect(0, "EOF");
-                    mConnected = false;
+			                } catch (SSLException ex) {
+			                    // Connection reset by peer
+			                    Log.d(TAG, "Websocket SSL error!", ex);
+			                    mListener.onDisconnect(0, "SSL");
+			                    mConnected = false;
 
-                } catch (SSLException ex) {
-                    // Connection reset by peer
-                    Log.d(TAG, "Websocket SSL error!", ex);
-                    mListener.onDisconnect(0, "SSL");
-                    mConnected = false;
-
-                } catch (Exception ex) {
+			                } catch (Exception ex) {
+			                    mListener.onError(ex);
+			                }
+			            	Log.d(TAG, "finish WebSocket reading thread.");
+			            }
+			        }, THREAD_NAME_READ).start();
+		        } catch (EOFException ex) {
+		            Log.d(TAG, "WebSocket EOF!", ex);
+		            mListener.onDisconnect(0, "EOF");
+		            mConnected = false;
+		        } catch (SSLException ex) {
+		            // Connection reset by peer
+		            Log.d(TAG, "Websocket SSL error!", ex);
+		            mListener.onDisconnect(0, "SSL");
+		            mConnected = false;
+		        } catch (Exception ex) {
                     mListener.onError(ex);
                 }
-            }
-        }, THREAD_NAME_READ);
-        mThread.start();
+			}
+		});
     }
 
     public void disconnect() {
-        if (mSocket != null) {
+        if (mHandlerThread != null && mHandlerThread.isAlive()) {
             mHandler.post(new Runnable() {
                 @Override
                 public void run() {
@@ -163,6 +185,8 @@ public class WebSocketClient {
                         mSocket = null;
                     }
                     mConnected = false;
+                    mHandlerThread.quit();
+                    mHandlerThread = null;
                 }
             });
         }
@@ -224,11 +248,14 @@ public class WebSocketClient {
             @Override
             public void run() {
                 try {
-                    synchronized (mSendLock) {
-                        OutputStream outputStream = mSocket.getOutputStream();
-                        outputStream.write(frame);
-                        outputStream.flush();
-                    }
+                	if (mSocket == null) {
+                		Log.d(TAG, "Can't send frame because Socket is closed.");
+                		return;
+                	}
+                	
+                    OutputStream outputStream = mSocket.getOutputStream();
+                    outputStream.write(frame);
+                    outputStream.flush();
                 } catch (IOException e) {
                     mListener.onError(e);
                 }
