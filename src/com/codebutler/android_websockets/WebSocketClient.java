@@ -131,7 +131,7 @@ public class WebSocketClient {
                     out.print("GET " + path + " HTTP/1.1\r\n");
                     out.print("Upgrade: websocket\r\n");
                     out.print("Connection: Upgrade\r\n");
-                    out.print("Host: " + mURI.getHost() + "\r\n");
+                    out.print("Host: " + mURI.getHost() + ":" + port + "\r\n");
                     out.print("Origin: " + origin.toString() + "\r\n");
                     out.print("Sec-WebSocket-Key: " + createSecret() + "\r\n");
                     out.print("Sec-WebSocket-Version: 13\r\n");
