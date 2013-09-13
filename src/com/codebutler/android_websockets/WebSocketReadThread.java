@@ -70,7 +70,7 @@ public class WebSocketReadThread extends Thread {
 				final String reason = getDisconnectReason(ex);
 				Log.e(TAG, "WebSocket closed." + reason, ex);
 				mClient.getListener().onError(ex);
-				mClient.getListener().onDisconnect(0, reason);
+				mClient.getListener().onDisconnect(1006, reason);
 			} else {
 				Log.e(TAG, "Error occured after disconnected.", ex);
 			}

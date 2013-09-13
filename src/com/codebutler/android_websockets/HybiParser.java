@@ -133,7 +133,7 @@ public class HybiParser {
         }
         
         if (!mClient.isConnected()) {
-        	mClient.getListener().onDisconnect(0, "EOF");
+        	mClient.getListener().onDisconnect(1006, "EOF");
         }
     }
 
@@ -289,7 +289,7 @@ public class HybiParser {
             }
 
         } else if (opcode == OP_CLOSE) {
-            int    code   = (payload.length >= 2) ? 256 * payload[0] + payload[1] : 0;
+            int    code   = (payload.length >= 2) ? 256 * payload[0] + payload[1] : 1005;
             String reason = (payload.length >  2) ? encode(slice(payload, 2))     : null;
             Log.d(TAG, "Got close op! " + code + " " + reason);
             if (mClient.isConnected()) {
