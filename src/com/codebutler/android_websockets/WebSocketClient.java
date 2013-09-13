@@ -38,7 +38,7 @@ public class WebSocketClient {
     private final URI                      mURI;
     private final Listener                 mListener;
     private final List<BasicNameValuePair> mExtraHeaders;
-    private final HybiParser mParser;
+    private final FrameFactory          mFrameMarshaller;
     
     /** access on websocket-write-thread */
     private Socket                   mSocket;
@@ -64,12 +64,12 @@ public class WebSocketClient {
     }
 
     public WebSocketClient(URI uri, Listener listener, List<BasicNameValuePair> extraHeaders) {
-        mURI          = uri;
-        mListener     = listener;
-        mExtraHeaders = extraHeaders;
-        mConnected    = false;
-        mParser       = new HybiParser(this);
-        mHeartbeat     = new HeartBeat();
+        mURI             = uri;
+        mListener        = listener;
+        mExtraHeaders    = extraHeaders;
+        mConnected       = false;
+        mFrameMarshaller = new FrameFactory();
+        mHeartbeat       = new HeartBeat();
     }
 
     public Listener getListener() {
@@ -166,11 +166,11 @@ public class WebSocketClient {
     }
 
     public void disconnect() {
-		mParser.close(1000,
-				"the purpose for which the connection was established has been fulfilled.");
 		mHandler.post(new Runnable() {
 			@Override
 			public void run() {
+				sendFrameSync(mFrameMarshaller.createCloseFrame(1000,
+						"the purpose for which the connection was established has been fulfilled."));
 				// MUST set mConnected to false after close frame send.
 				mConnected = false;
 				mHandler.postDelayed(new DestroyTask(), 5000);
@@ -210,11 +210,19 @@ public class WebSocketClient {
 	}
 
     public void send(String data) {
-        sendFrame(mParser.frame(data));
+        sendFrame(mFrameMarshaller.createFrame(data));
     }
 
     public void send(byte[] data) {
-        sendFrame(mParser.frame(data));
+        sendFrame(mFrameMarshaller.createFrame(data));
+    }
+    
+    public void sendPong(final byte[] payload) {
+    	sendFrame(mFrameMarshaller.createPongFrame(payload));
+    }
+    
+    public void sendPing(final String message) {
+    	sendFrame(mFrameMarshaller.createPingFrame(message));
     }
 
     public boolean isConnected() {
@@ -244,24 +252,28 @@ public class WebSocketClient {
         return Base64.encodeToString(nonce, Base64.DEFAULT).trim();
     }
 
+    void sendFrameSync(final byte[] frame) {
+    	try {
+        	if (mSocket == null) {
+        		Log.d(TAG, "Can't send frame because Socket is closed.");
+        		return;
+        	}
+        	
+            OutputStream outputStream = mSocket.getOutputStream();
+            outputStream.write(frame);
+            outputStream.flush();
+
+            setTimestamp();
+        } catch (IOException e) {
+            mListener.onError(e);
+        }
+    }
+    
     void sendFrame(final byte[] frame) {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                try {
-                	if (mSocket == null) {
-                		Log.d(TAG, "Can't send frame because Socket is closed.");
-                		return;
-                	}
-                	
-                    OutputStream outputStream = mSocket.getOutputStream();
-                    outputStream.write(frame);
-                    outputStream.flush();
-
-                    setTimestamp();
-                } catch (IOException e) {
-                    mListener.onError(e);
-                }
+                sendFrameSync(frame);
             }
         });
     }
@@ -284,7 +296,7 @@ public class WebSocketClient {
 				mHandler.removeCallbacks(this); // 二重で登録してしまわないように削除．
 				final long dx = mTimestamp + mHeartbeatInterval - currentTimeMillis();
 				if (dx < HEARTBEAT_INTERVAL_MARGIN) {
-					mParser.ping("heartbeat");
+					sendPing("heartbeat");
 					setTimestamp();
 					mHandler.postDelayed(this, mHeartbeatInterval);
 				} else {

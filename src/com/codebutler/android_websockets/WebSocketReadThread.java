@@ -17,28 +17,28 @@ import android.text.TextUtils;
 import android.util.Log;
 
 // This thread is closed When the Socket is closed.
-public class WebSocketReadThread extends Thread {
+class WebSocketReadThread extends Thread {
 
 	private static final String TAG = "WebSocketReadThread";
 	private static final String THREAD_NAME = "websocket-read-thread";
 
 	private final WebSocketClient mClient; 
 	private final InputStream mInputStream;
-	private final HybiParser mParser;
+	private final FrameHandler mFrameHandler;
 
 	public WebSocketReadThread(
 			final WebSocketClient client) throws IOException {
 		super(THREAD_NAME);
 		this.mClient = client;
 		this.mInputStream = client.getSocket().getInputStream();
-		this.mParser = new HybiParser(client);
+		this.mFrameHandler = new FrameHandler(client);
 	}
 
 	@Override
 	public void run() {
 		Log.i(TAG, "start WebSocket reading thread.");
 		try {
-			HybiParser.HappyDataInputStream stream = new HybiParser.HappyDataInputStream(
+			FrameHandler.HappyDataInputStream stream = new FrameHandler.HappyDataInputStream(
 					mInputStream);
 
 			// Read HTTP response status line.
@@ -64,7 +64,7 @@ public class WebSocketReadThread extends Thread {
 			mClient.getListener().onConnect();
 
 			// Now decode websocket frames.
-			mParser.start(stream);
+		    mFrameHandler.start(stream);
 		} catch (IOException ex) {
 			if  (mClient.isConnected()) {
 				final String reason = getDisconnectReason(ex);
@@ -106,7 +106,7 @@ public class WebSocketReadThread extends Thread {
 	}
 
 	// Can't use BufferedReader because it buffers past the HTTP data.
-	private String readLine(HybiParser.HappyDataInputStream reader)
+	private String readLine(FrameHandler.HappyDataInputStream reader)
 			throws IOException {
 		int readChar = reader.read();
 		if (readChar == -1) {
