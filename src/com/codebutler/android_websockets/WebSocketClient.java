@@ -26,6 +26,10 @@ import android.text.TextUtils;
 import android.util.Base64;
 import android.util.Log;
 
+/**
+ * WARN: connection is not reusable. If a connection is closed once, don't call
+ * connection again.
+ */
 public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
     private static final String THREAD_NAME_WRITE = "websocket-write-thread";
@@ -41,6 +45,8 @@ public class WebSocketClient {
     /** create on main thread, destroy on websocket-write-thread */
     private HandlerThread            mHandlerThread;
     private Handler                  mHandler;
+    
+    private Thread readThread;
     
     private volatile boolean         mConnected;
 
@@ -144,7 +150,8 @@ public class WebSocketClient {
                     out.flush();
 
                     setTimestamp();
-                    new WebSocketReadThread(WebSocketClient.this).start();
+                    readThread = new WebSocketReadThread(WebSocketClient.this);
+                    readThread.start();
 		        } catch (IOException ex) {
 		        	mListener.onError(ex);
                 } catch (KeyManagementException ex) {
@@ -159,31 +166,48 @@ public class WebSocketClient {
     }
 
     public void disconnect() {
-    	final HandlerThread handlerThread;
-    	synchronized (mConnectionLock) {
-    		if (mHandlerThread == null) {
-    			return;
-    		}
-    		handlerThread = mHandlerThread;
-        	mHandlerThread = null;
-    	}
-    	mHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (mSocket != null) {
-                    try {
-                        mSocket.close();
-                    } catch (IOException ex) {
-                        Log.d(TAG, "Error while disconnecting", ex);
-                        mListener.onError(ex);
-                    }
-                    mSocket = null;
-                }
-                mConnected = false;
-                handlerThread.quit();
-            }
-        });
+		mParser.close(1000,
+				"the purpose for which the connection was established has been fulfilled.");
+		mHandler.post(new Runnable() {
+			@Override
+			public void run() {
+				// MUST set mConnected to false after close frame send.
+				mConnected = false;
+				mHandler.postDelayed(new DestroyTask(), 5000);
+			}
+		});
     }
+    
+	// 読込用スレッドを閉じた後，書込用スレッドで終了処理を実施する
+	void destroy() {
+		mHandler.post(new DestroyTask());
+	}
+	
+	private void closeSocket() {
+		if (mSocket != null) {
+			if (!mSocket.isClosed()) {
+				try {
+					Log.d(TAG, "Close socket.");
+					mSocket.close();
+				} catch (IOException ex) {
+					Log.e(TAG, "Error while disconnecting",
+							ex);
+				}
+			} else {
+				Log.d(TAG, "Socket was closed already.");
+			}
+			mSocket = null;
+		}
+	}
+	
+	private void interruptWriteThread() {
+		synchronized (mConnectionLock) {
+			if (mHandlerThread != null) {
+				mHandlerThread.interrupt();
+				mHandlerThread = null;
+			}
+		}
+	}
 
     public void send(String data) {
         sendFrame(mParser.frame(data));
@@ -196,6 +220,21 @@ public class WebSocketClient {
     public boolean isConnected() {
         return mConnected;
     }
+    
+	// for unit test.
+	boolean isSocketDestroyed() {
+		return mSocket == null || mSocket.isClosed();
+	}
+	
+	// for unit test.
+	boolean isWriteThreadDestroyed() {
+		return mHandlerThread == null || !mHandlerThread.isAlive();
+	}
+	
+	// for unit test.
+	boolean isReadThreadDestroyed() {
+		return readThread == null || !readThread.isAlive();
+	}
 
     private String createSecret() {
         byte[] nonce = new byte[16];
@@ -255,6 +294,14 @@ public class WebSocketClient {
 		}
     	
     }
+    
+	private class DestroyTask implements Runnable {
+		@Override
+		public void run() {
+			closeSocket();
+			interruptWriteThread();
+		}
+	}
 
     public interface Listener {
         public void onConnect();

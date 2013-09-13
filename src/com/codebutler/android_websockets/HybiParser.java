@@ -30,11 +30,15 @@
 
 package com.codebutler.android_websockets;
 
-import android.util.Log;
-
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
 import java.util.List;
+
+import android.util.Log;
 
 public class HybiParser {
     private static final String TAG = "HybiParser";
@@ -54,8 +58,6 @@ public class HybiParser {
 
     private byte[] mMask    = new byte[0];
     private byte[] mPayload = new byte[0];
-
-    private boolean mClosed = false;
 
     private ByteArrayOutputStream mBuffer = new ByteArrayOutputStream();
 
@@ -129,7 +131,10 @@ public class HybiParser {
                     break;
             }
         }
-        mClient.getListener().onDisconnect(0, "EOF");
+        
+        if (!mClient.isConnected()) {
+        	mClient.getListener().onDisconnect(0, "EOF");
+        }
     }
 
     private void parseOpcode(byte data) throws ProtocolError {
@@ -191,8 +196,6 @@ public class HybiParser {
     }
 
     private byte[] frame(Object data, int opcode, int errorCode) {
-        if (mClosed) return null;
-
         Log.d(TAG, "Creating frame for: " + data + " op: " + opcode + " err: " + errorCode);
 
         byte[] buffer = (data instanceof String) ? decode((String) data) : (byte[]) data;
@@ -242,13 +245,11 @@ public class HybiParser {
     }
 
     public void ping(String message) {
-        mClient.send(frame(message, OP_PING, -1));
+        mClient.sendFrame(frame(message, OP_PING, -1));
     }
 
     public void close(int code, String reason) {
-        if (mClosed) return;
-        mClient.send(frame(reason, OP_CLOSE, code));
-        mClosed = true;
+        mClient.sendFrame(frame(reason, OP_CLOSE, code));
     }
 
     private void emitFrame() throws IOException {
@@ -291,8 +292,10 @@ public class HybiParser {
             int    code   = (payload.length >= 2) ? 256 * payload[0] + payload[1] : 0;
             String reason = (payload.length >  2) ? encode(slice(payload, 2))     : null;
             Log.d(TAG, "Got close op! " + code + " " + reason);
-            mClient.getListener().onDisconnect(code, reason);
-
+            if (mClient.isConnected()) {
+            	mClient.getListener().onDisconnect(code, reason);
+            	mClient.disconnect();
+            }
         } else if (opcode == OP_PING) {
             if (payload.length > 125) { throw new ProtocolError("Ping payload too large"); }
             Log.d(TAG, "Sending pong!!");
@@ -372,7 +375,9 @@ public class HybiParser {
     }
 
     public static class ProtocolError extends IOException {
-        public ProtocolError(String detailMessage) {
+		private static final long serialVersionUID = 3235810088403426201L;
+
+		public ProtocolError(String detailMessage) {
             super(detailMessage);
         }
     }

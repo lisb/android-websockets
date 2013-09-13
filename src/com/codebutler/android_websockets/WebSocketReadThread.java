@@ -68,16 +68,19 @@ public class WebSocketReadThread extends Thread {
 		} catch (IOException ex) {
 			if  (mClient.isConnected()) {
 				final String reason = getDisconnectReason(ex);
-				Log.d(TAG, "WebSocket " + reason + "!", ex);
-				mClient.getListener().onDisconnect(0, reason);
-				mClient.setConnected(false);
-			} else {
+				Log.e(TAG, "WebSocket closed." + reason, ex);
 				mClient.getListener().onError(ex);
+				mClient.getListener().onDisconnect(0, reason);
+			} else {
+				Log.e(TAG, "Error occured after disconnected.", ex);
 			}
 		} catch (HttpException ex) {
 			mClient.getListener().onError(ex);
 		}
-		Log.d(TAG, "finish WebSocket reading thread.");
+
+		mClient.setConnected(false);
+		mClient.destroy();
+		Log.d(TAG, "finish WebSocket reading thread. ");
 	}
 	
 	private String getDisconnectReason (final IOException e) {
