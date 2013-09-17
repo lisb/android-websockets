@@ -119,7 +119,6 @@ public class WebSocketClient {
 		} else {
 			Log.e(TAG, "Error occured.", error);
 			if (mListener != null) {
-
 				mListener.onError(error);
 			}
 		}
@@ -195,13 +194,17 @@ public class WebSocketClient {
                     readThread = new WebSocketReadThread(WebSocketClient.this);
                     readThread.start();
 		        } catch (IOException ex) {
-		        	onError(ex);
+					onError(ex);
+					final String reason = WebSocketReadThread
+							.getDisconnectReason(ex);
+					Log.e(TAG, "WebSocket closed." + reason, ex);
+					onClose(1006, reason);
                 } catch (KeyManagementException ex) {
-                    onError(ex);
+                    throw new RuntimeException(ex);
 				} catch (NoSuchAlgorithmException ex) {
-                    onError(ex);
+					throw new RuntimeException(ex);
 				} catch (URISyntaxException ex) {
-                    onError(ex);
+					throw new RuntimeException(ex);
 				}
 			}
 		});

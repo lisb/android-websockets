@@ -26,7 +26,7 @@ class WebSocketReadThread extends Thread {
 	private final InputStream mInputStream;
 	private final FrameHandler mFrameHandler;
 
-	public WebSocketReadThread(
+	WebSocketReadThread(
 			final WebSocketClient client) throws IOException {
 		super(THREAD_NAME);
 		this.mClient = client;
@@ -71,13 +71,15 @@ class WebSocketReadThread extends Thread {
 			mClient.onClose(1006, reason);	
 		} catch (HttpException ex) {
 			mClient.onError(ex);
+			Log.e(TAG, "WebSocket closed. HTTP status code is not 101 Switching Protocols.", ex);
+			mClient.onClose(1006, "HTTP status code is not 101 Switching Protocols");	
 		}
 
 		mClient.destroy();
 		Log.d(TAG, "finish WebSocket reading thread. ");
 	}
 	
-	private String getDisconnectReason (final IOException e) {
+	public static String getDisconnectReason (final IOException e) {
 		if (e instanceof EOFException) {
 			return "EOF";
 		} else if (e instanceof SSLException) {
