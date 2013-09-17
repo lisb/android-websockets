@@ -54,7 +54,6 @@ public class WebSocketClientTest extends TestCase {
 						}
 					}
 				}, null);
-		client.open();
 		synchronized (lock) {
 			lock.wait(5000);
 			assertNull(errorReport, errorReport);
