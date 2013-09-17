@@ -217,21 +217,27 @@ public class WebSocketClient {
 		});
     }
 
-    public void disconnect() {
-		mHandler.post(new Runnable() {
-			@Override
-			public void run() {
-				if (!mCloseSent) {
-					final byte[] frame = mFrameMarshaller
-							.createCloseFrame(1000,
-									"the purpose for which the connection was established has been fulfilled.");
-					sendFrameSync(frame, true);
-					mCloseSent = true;
-					mHandler.postDelayed(new DestroyTask(), 5000);
+	public void disconnect() {
+		sendClose(1000,
+				"the purpose for which the connection was established has been fulfilled.");
+	}
+
+	void sendClose(final int code, final String reason) {
+		if (mHandlerThread != null && mHandlerThread.isAlive()) {
+			mHandler.post(new Runnable() {
+				@Override
+				public void run() {
+					if (!mCloseSent) {
+						final byte[] frame = mFrameMarshaller.createCloseFrame(
+								code, reason);
+						sendFrameSync(frame, true);
+						mCloseSent = true;
+						mHandler.postDelayed(new DestroyTask(), 5000);
+					}
 				}
-			}
-		});
-    }
+			});
+		}
+	}
     
 	// 読込用スレッドを閉じた後，書込用スレッドで終了処理を実施する
 	void destroy() {

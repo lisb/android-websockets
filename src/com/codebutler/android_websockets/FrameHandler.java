@@ -175,7 +175,7 @@ class FrameHandler {
             String reason = (payload.length >  2) ? encode(slice(payload, 2))     : null;
             Log.d(TAG, "Got close op! " + code + " " + reason);
         	mClient.onDisconnect(code, reason);
-        	mClient.disconnect();
+        	mClient.sendClose(code, reason);
         } else if (opcode == Frames.OP_PING) {
             if (payload.length > 125) { throw new ProtocolError("Ping payload too large"); }
             Log.d(TAG, "Sending pong!!");
