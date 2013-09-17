@@ -59,26 +59,20 @@ class WebSocketReadThread extends Thread {
 				}
 			}
 
-			mClient.setConnected(true);
+			mClient.onConnect();
 			mClient.postHeartbeat();
-			mClient.getListener().onConnect();
 
 			// Now decode websocket frames.
 		    mFrameHandler.start(stream);
 		} catch (IOException ex) {
-			if  (mClient.isConnected()) {
-				final String reason = getDisconnectReason(ex);
-				Log.e(TAG, "WebSocket closed." + reason, ex);
-				mClient.getListener().onError(ex);
-				mClient.getListener().onDisconnect(1006, reason);
-			} else {
-				Log.e(TAG, "Error occured after disconnected.", ex);
-			}
+			mClient.onError(ex);
+			final String reason = getDisconnectReason(ex);
+			Log.e(TAG, "WebSocket closed." + reason, ex);
+			mClient.onDisconnect(1006, reason);	
 		} catch (HttpException ex) {
-			mClient.getListener().onError(ex);
+			mClient.onError(ex);
 		}
 
-		mClient.setConnected(false);
 		mClient.destroy();
 		Log.d(TAG, "finish WebSocket reading thread. ");
 	}

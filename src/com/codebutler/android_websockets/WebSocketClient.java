@@ -48,7 +48,10 @@ public class WebSocketClient {
     
     private Thread readThread;
     
-    private volatile boolean         mConnected;
+    private volatile boolean         mHandShaked;    // modify on websocket read thread. read on websocket write thread.
+    private volatile boolean         mDisconnectDispatched;  // modify on websocket read thread. read on websocket read thread and websocket write thread.
+    private volatile boolean         mCloseReceived; // modify on websocket read thread. read on websocket read thread and websocket write thread.
+    private boolean                  mCloseSent;     // modify on websocket write thread. read on websocket write thread;
 
     private final Object             mConnectionLock = new Object();
 
@@ -67,7 +70,6 @@ public class WebSocketClient {
         mURI             = uri;
         mListener        = listener;
         mExtraHeaders    = extraHeaders;
-        mConnected       = false;
         mFrameMarshaller = new FrameFactory();
         mHeartbeat       = new HeartBeat();
     }
@@ -75,6 +77,52 @@ public class WebSocketClient {
     public Listener getListener() {
         return mListener;
     }
+    
+    void onConnect() {
+    	mHandShaked = true;
+    	if (mListener != null) {
+    		mListener.onConnect();
+    	}
+    }
+    
+    void onMessage(final String message) {
+    	if (mListener != null) {
+    		mListener.onMessage(message);
+    	}
+    }
+    
+    void onMessage(final byte[] data) {
+    	if (mListener != null) {
+    		mListener.onMessage(data);
+    	}
+    }
+    
+    void onCloseReceiverd() {
+    	mCloseReceived = true;
+    }
+    
+    void onDisconnect(final int code, final String reason) {
+    	if (mDisconnectDispatched) {
+    		return;
+    	}
+
+    	mDisconnectDispatched = true;
+    	if (mListener != null && mHandShaked) {
+    		mListener.onDisconnect(code, reason);
+    	}
+    }
+    
+	void onError(final Exception error) {
+		if (mDisconnectDispatched) {
+			Log.e(TAG, "Error occured after disconnect.", error);
+		} else {
+			Log.e(TAG, "Error occured.", error);
+			if (mListener != null) {
+
+				mListener.onError(error);
+			}
+		}
+	}
     
     public void setHeartbeatInterval(long heartbeatInterval) {
     	synchronized (mHeartbeat) {
@@ -91,13 +139,17 @@ public class WebSocketClient {
 		return mSocket;
 	}
     
-    void setConnected(boolean mConnected) {
-		this.mConnected = mConnected;
+	private boolean canSendFrame() {
+		return mHandShaked && !mCloseReceived && !mCloseSent;
+	}
+	
+	private boolean canSendClose() {
+		return mHandShaked && !mCloseSent;
 	}
     
     void postHeartbeat() {
     	synchronized (mHeartbeat) {
-    		if (mConnected) {
+    		if (canSendFrame()) {
     			mHandler.removeCallbacks(mHeartbeat);
 	    		if (mHeartbeatInterval > 0) {
 	    			mHandler.post(mHeartbeat);
@@ -153,13 +205,13 @@ public class WebSocketClient {
                     readThread = new WebSocketReadThread(WebSocketClient.this);
                     readThread.start();
 		        } catch (IOException ex) {
-		        	mListener.onError(ex);
+		        	onError(ex);
                 } catch (KeyManagementException ex) {
-                    mListener.onError(ex);
+                    onError(ex);
 				} catch (NoSuchAlgorithmException ex) {
-                    mListener.onError(ex);
+                    onError(ex);
 				} catch (URISyntaxException ex) {
-                    mListener.onError(ex);
+                    onError(ex);
 				}
 			}
 		});
@@ -169,11 +221,14 @@ public class WebSocketClient {
 		mHandler.post(new Runnable() {
 			@Override
 			public void run() {
-				sendFrameSync(mFrameMarshaller.createCloseFrame(1000,
-						"the purpose for which the connection was established has been fulfilled."));
-				// MUST set mConnected to false after close frame send.
-				mConnected = false;
-				mHandler.postDelayed(new DestroyTask(), 5000);
+				if (!mCloseSent) {
+					final byte[] frame = mFrameMarshaller
+							.createCloseFrame(1000,
+									"the purpose for which the connection was established has been fulfilled.");
+					sendFrameSync(frame, true);
+					mCloseSent = true;
+					mHandler.postDelayed(new DestroyTask(), 5000);
+				}
 			}
 		});
     }
@@ -196,39 +251,33 @@ public class WebSocketClient {
 			} else {
 				Log.d(TAG, "Socket was closed already.");
 			}
-			mSocket = null;
 		}
 	}
 	
 	private void interruptWriteThread() {
 		synchronized (mConnectionLock) {
 			if (mHandlerThread != null) {
-				mHandlerThread.interrupt();
-				mHandlerThread = null;
+				mHandlerThread.quit();
 			}
 		}
 	}
 
     public void send(String data) {
-        sendFrame(mFrameMarshaller.createFrame(data));
+        sendFrame(mFrameMarshaller.createFrame(data), false);
     }
 
     public void send(byte[] data) {
-        sendFrame(mFrameMarshaller.createFrame(data));
+        sendFrame(mFrameMarshaller.createFrame(data), false);
     }
     
     public void sendPong(final byte[] payload) {
-    	sendFrame(mFrameMarshaller.createPongFrame(payload));
+    	sendFrame(mFrameMarshaller.createPongFrame(payload), false);
     }
     
     public void sendPing(final String message) {
-    	sendFrame(mFrameMarshaller.createPingFrame(message));
+    	sendFrame(mFrameMarshaller.createPingFrame(message), false);
     }
 
-    public boolean isConnected() {
-        return mConnected;
-    }
-    
 	// for unit test.
 	boolean isSocketDestroyed() {
 		return mSocket == null || mSocket.isClosed();
@@ -252,10 +301,20 @@ public class WebSocketClient {
         return Base64.encodeToString(nonce, Base64.DEFAULT).trim();
     }
 
-    void sendFrameSync(final byte[] frame) {
+    void sendFrameSync(final byte[] frame, final boolean closeFrame) {
     	try {
         	if (mSocket == null) {
-        		Log.d(TAG, "Can't send frame because Socket is closed.");
+        		Log.e(TAG, "Can't send frame because Socket is closed.");
+        		return;
+        	}
+        	
+        	if (!closeFrame && !canSendFrame()) {
+        		Log.e(TAG, "Can't send normal frame.");
+        		return;
+        	}
+        	
+        	if (closeFrame && !canSendClose()) {
+        		Log.e(TAG, "Can't send close frame.");
         		return;
         	}
         	
@@ -265,15 +324,15 @@ public class WebSocketClient {
 
             setTimestamp();
         } catch (IOException e) {
-            mListener.onError(e);
+            onError(e);
         }
     }
     
-    void sendFrame(final byte[] frame) {
+    void sendFrame(final byte[] frame, final boolean closeFrame) {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                sendFrameSync(frame);
+                sendFrameSync(frame, closeFrame);
             }
         });
     }
@@ -289,7 +348,7 @@ public class WebSocketClient {
 		@Override
 		public void run() {
 			synchronized (this) {
-				if (mHeartbeatInterval <= 0 || !mConnected) {
+				if (mHeartbeatInterval <= 0 || !canSendFrame()) {
 					return;
 				}
 				

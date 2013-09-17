@@ -1,9 +1,12 @@
 package com.codebutler.android_websockets;
 
 import junit.framework.TestCase;
+import android.util.Log;
 
 public class WebSocketClientTest extends TestCase {
 
+	private static final String LOG_TAG = WebSocketClientTest.class
+			.getSimpleName();
 	private WebSocketClient client;
 	private String errorReport;
 	private Object lock = new Object();
@@ -40,11 +43,7 @@ public class WebSocketClientTest extends TestCase {
 
 					@Override
 					public void onDisconnect(int code, String reason) {
-						synchronized (lock) {
-							errorReport = "onDisconnect invoked. " + code + " "
-									+ reason;
-							lock.notifyAll();
-						}
+						Log.i(LOG_TAG, "onDisconnect. " + code + " " + reason);
 					}
 
 					@Override
@@ -57,11 +56,12 @@ public class WebSocketClientTest extends TestCase {
 				}, null);
 		client.connect();
 		synchronized (lock) {
-			lock.wait(2000);
+			lock.wait(5000);
 			assertNull(errorReport, errorReport);
 			assertTrue("socket is alived.", client.isSocketDestroyed());
-			assertTrue("write thread is alived.", client.isWriteThreadDestroyed());
 			assertTrue("read thread is alived.", client.isReadThreadDestroyed());
+			assertTrue("write thread is alived.",
+					client.isWriteThreadDestroyed());
 		}
 	}
 }

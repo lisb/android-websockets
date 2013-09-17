@@ -89,9 +89,7 @@ class FrameHandler {
             }
         }
         
-        if (!mClient.isConnected()) {
-        	mClient.getListener().onDisconnect(1006, "EOF");
-        }
+    	mClient.onDisconnect(1006, "EOF");
     }
 
     private void parseOpcode(byte data) throws ProtocolError {
@@ -148,9 +146,9 @@ class FrameHandler {
             if (mFinal) {
                 byte[] message = mBuffer.toByteArray();
                 if (mMode == Frames.MODE_TEXT) {
-                    mClient.getListener().onMessage(encode(message));
+                    mClient.onMessage(encode(message));
                 } else {
-                    mClient.getListener().onMessage(message);
+                    mClient.onMessage(message);
                 }
                 reset();
             }
@@ -158,7 +156,7 @@ class FrameHandler {
         } else if (opcode == Frames.OP_TEXT) {
             if (mFinal) {
                 String messageText = encode(payload);
-                mClient.getListener().onMessage(messageText);
+                mClient.onMessage(messageText);
             } else {
                 mMode = Frames.MODE_TEXT;
                 mBuffer.write(payload);
@@ -166,7 +164,7 @@ class FrameHandler {
 
         } else if (opcode == Frames.OP_BINARY) {
             if (mFinal) {
-                mClient.getListener().onMessage(payload);
+                mClient.onMessage(payload);
             } else {
                 mMode = Frames.MODE_BINARY;
                 mBuffer.write(payload);
@@ -176,10 +174,8 @@ class FrameHandler {
             int    code   = (payload.length >= 2) ? 256 * payload[0] + payload[1] : 1005;
             String reason = (payload.length >  2) ? encode(slice(payload, 2))     : null;
             Log.d(TAG, "Got close op! " + code + " " + reason);
-            if (mClient.isConnected()) {
-            	mClient.getListener().onDisconnect(code, reason);
-            	mClient.disconnect();
-            }
+        	mClient.onDisconnect(code, reason);
+        	mClient.disconnect();
         } else if (opcode == Frames.OP_PING) {
             if (payload.length > 125) { throw new ProtocolError("Ping payload too large"); }
             Log.d(TAG, "Sending pong!!");
