@@ -42,19 +42,19 @@ public class WebSocketClientTest extends TestCase {
 					}
 
 					@Override
-					public void onDisconnect(int code, String reason) {
+					public void onClose(int code, String reason) {
 						Log.i(LOG_TAG, "onDisconnect. " + code + " " + reason);
 					}
 
 					@Override
-					public void onConnect() {
-						client.disconnect();
+					public void onOpen() {
+						client.close();
 						synchronized (lock) {
 							errorReport = null;
 						}
 					}
 				}, null);
-		client.connect();
+		client.open();
 		synchronized (lock) {
 			lock.wait(5000);
 			assertNull(errorReport, errorReport);

@@ -38,13 +38,13 @@ public class WebSocketClient {
     private final URI                      mURI;
     private final Listener                 mListener;
     private final List<BasicNameValuePair> mExtraHeaders;
-    private final FrameFactory          mFrameMarshaller;
+    private final FrameFactory             mFrameMarshaller;
+    private final HandlerThread            mHandlerThread;
+    private final Handler                  mHandler;
+    private final Runnable                 mHeartbeat;
     
     /** access on websocket-write-thread */
     private Socket                   mSocket;
-    /** create on main thread, destroy on websocket-write-thread */
-    private HandlerThread            mHandlerThread;
-    private Handler                  mHandler;
     
     private Thread readThread;
     
@@ -53,9 +53,6 @@ public class WebSocketClient {
     private volatile boolean         mCloseReceived; // modify on websocket read thread. read on websocket read thread and websocket write thread.
     private boolean                  mCloseSent;     // modify on websocket write thread. read on websocket write thread;
 
-    private final Object             mConnectionLock = new Object();
-
-    private final Runnable           mHeartbeat;
     /** access from all thread */
     private long                     mHeartbeatInterval;
     private volatile long            mTimestamp; 
@@ -72,16 +69,20 @@ public class WebSocketClient {
         mExtraHeaders    = extraHeaders;
         mFrameMarshaller = new FrameFactory();
         mHeartbeat       = new HeartBeat();
+        mHandlerThread   = new HandlerThread(THREAD_NAME_WRITE);
+        mHandlerThread.start();
+        mHandler         = new Handler(mHandlerThread.getLooper());
+        open();
     }
 
     public Listener getListener() {
         return mListener;
     }
     
-    void onConnect() {
+    void onOpen() {
     	mHandShaked = true;
     	if (mListener != null) {
-    		mListener.onConnect();
+    		mListener.onOpen();
     	}
     }
     
@@ -101,14 +102,14 @@ public class WebSocketClient {
     	mCloseReceived = true;
     }
     
-    void onDisconnect(final int code, final String reason) {
+    void onClose(final int code, final String reason) {
     	if (mDisconnectDispatched) {
     		return;
     	}
 
     	mDisconnectDispatched = true;
     	if (mListener != null && mHandShaked) {
-    		mListener.onDisconnect(code, reason);
+    		mListener.onClose(code, reason);
     	}
     }
     
@@ -158,18 +159,7 @@ public class WebSocketClient {
 		}
     }
 
-    public void connect() {
-    	synchronized (mConnectionLock) {
-	    	if (mHandlerThread != null && mHandlerThread.isAlive()) {
-	        	Log.d(TAG, "WebSocket writing thread is existed.");
-	            return;
-	        }
-	    	
-	    	mHandlerThread = new HandlerThread(THREAD_NAME_WRITE);
-	        mHandlerThread.start();
-	        mHandler = new Handler(mHandlerThread.getLooper());
-    	}
-
+    private void open() {
         mHandler.post(new Runnable() {
 			@Override
 			public void run() {
@@ -217,13 +207,13 @@ public class WebSocketClient {
 		});
     }
 
-	public void disconnect() {
+	public void close() {
 		sendClose(1000,
 				"the purpose for which the connection was established has been fulfilled.");
 	}
 
 	void sendClose(final int code, final String reason) {
-		if (mHandlerThread != null && mHandlerThread.isAlive()) {
+		if (mHandlerThread.isAlive()) {
 			mHandler.post(new Runnable() {
 				@Override
 				public void run() {
@@ -261,11 +251,7 @@ public class WebSocketClient {
 	}
 	
 	private void interruptWriteThread() {
-		synchronized (mConnectionLock) {
-			if (mHandlerThread != null) {
-				mHandlerThread.quit();
-			}
-		}
+		mHandlerThread.quit();
 	}
 
     public void send(String data) {
@@ -291,7 +277,7 @@ public class WebSocketClient {
 	
 	// for unit test.
 	boolean isWriteThreadDestroyed() {
-		return mHandlerThread == null || !mHandlerThread.isAlive();
+		return !mHandlerThread.isAlive();
 	}
 	
 	// for unit test.
@@ -381,10 +367,10 @@ public class WebSocketClient {
 	}
 
     public interface Listener {
-        public void onConnect();
+        public void onOpen();
         public void onMessage(String message);
         public void onMessage(byte[] data);
-        public void onDisconnect(int code, String reason);
+        public void onClose(int code, String reason);
         public void onError(Exception error);
     }
 }

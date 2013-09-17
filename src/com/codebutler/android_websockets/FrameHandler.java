@@ -89,7 +89,7 @@ class FrameHandler {
             }
         }
         
-    	mClient.onDisconnect(1006, "EOF");
+    	mClient.onClose(1006, "EOF");
     }
 
     private void parseOpcode(byte data) throws ProtocolError {
@@ -174,7 +174,7 @@ class FrameHandler {
             int    code   = (payload.length >= 2) ? 256 * payload[0] + payload[1] : 1005;
             String reason = (payload.length >  2) ? encode(slice(payload, 2))     : null;
             Log.d(TAG, "Got close op! " + code + " " + reason);
-        	mClient.onDisconnect(code, reason);
+        	mClient.onClose(code, reason);
         	mClient.sendClose(code, reason);
         } else if (opcode == Frames.OP_PING) {
             if (payload.length > 125) { throw new ProtocolError("Ping payload too large"); }

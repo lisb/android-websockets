@@ -59,7 +59,7 @@ class WebSocketReadThread extends Thread {
 				}
 			}
 
-			mClient.onConnect();
+			mClient.onOpen();
 			mClient.postHeartbeat();
 
 			// Now decode websocket frames.
@@ -68,7 +68,7 @@ class WebSocketReadThread extends Thread {
 			mClient.onError(ex);
 			final String reason = getDisconnectReason(ex);
 			Log.e(TAG, "WebSocket closed." + reason, ex);
-			mClient.onDisconnect(1006, reason);	
+			mClient.onClose(1006, reason);	
 		} catch (HttpException ex) {
 			mClient.onError(ex);
 		}
