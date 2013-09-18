@@ -198,7 +198,7 @@ public class WebSocketClient {
 					final String reason = WebSocketReadThread
 							.getDisconnectReason(ex);
 					Log.e(TAG, "WebSocket closed." + reason, ex);
-					onClose(1006, reason);
+					onClose(CloseCodes.CLOSE_ABNORMAL, reason);
                 } catch (KeyManagementException ex) {
                     throw new RuntimeException(ex);
 				} catch (NoSuchAlgorithmException ex) {

@@ -89,7 +89,7 @@ class FrameHandler {
             }
         }
         
-    	mClient.onClose(1006, "EOF");
+    	mClient.onClose(CloseCodes.CLOSE_ABNORMAL, "EOF");
     }
 
     private void parseOpcode(byte data) throws ProtocolError {

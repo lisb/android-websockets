@@ -68,11 +68,11 @@ class WebSocketReadThread extends Thread {
 			mClient.onError(ex);
 			final String reason = getDisconnectReason(ex);
 			Log.e(TAG, "WebSocket closed." + reason, ex);
-			mClient.onClose(1006, reason);	
+			mClient.onClose(CloseCodes.CLOSE_ABNORMAL, reason);	
 		} catch (HttpException ex) {
 			mClient.onError(ex);
 			Log.e(TAG, "WebSocket closed. HTTP status code is not 101 Switching Protocols.", ex);
-			mClient.onClose(1006, "HTTP status code is not 101 Switching Protocols");	
+			mClient.onClose(CloseCodes.CLOSE_ABNORMAL, "HTTP status code is not 101 Switching Protocols");	
 		}
 
 		mClient.destroy();
