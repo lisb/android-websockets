@@ -172,7 +172,7 @@ class FrameHandler {
 
         } else if (opcode == Frames.OP_CLOSE) {
             int    code   = (payload.length >= 2) ? 256 * payload[0] + payload[1] : 1005;
-            String reason = (payload.length >  2) ? encode(slice(payload, 2))     : null;
+            String reason = (payload.length >  2) ? encode(slice(payload, 2))     : "";
             Log.d(TAG, "Got close op! " + code + " " + reason);
         	mClient.onClose(code, reason);
         	mClient.sendClose(code, reason);
