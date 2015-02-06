@@ -1,0 +1,29 @@
+apply plugin: 'com.android.library'
+apply plugin: 'com.github.dcendents.android-maven'
+
+group = 'com.codebutler.android_websockets'
+archivesBaseName = 'android_websockets'
+version = '0.0.1-custom-SNAPSHOT'
+
+android {
+    compileSdkVersion 8
+    buildToolsVersion "21.1.2"
+
+    defaultConfig {
+        minSdkVersion 8
+        targetSdkVersion 8
+
+        testApplicationId "com.codebutler.android_websockets.test"
+        testInstrumentationRunner "android.test.InstrumentationTestRunner"
+    }
+}
+
+task androidSourcesJar(type: Jar) {
+    classifier = 'sources'
+    from android.sourceSets.main.java.source
+}
+
+artifacts {
+   archives androidSourcesJar
+}
+
