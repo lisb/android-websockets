@@ -1,4 +1,4 @@
-package com.codebutler.android_websockets;
+package com.lisb.android.android_websockets;
 
 import java.util.Arrays;
 import java.util.List;

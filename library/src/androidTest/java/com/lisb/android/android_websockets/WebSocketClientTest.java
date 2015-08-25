@@ -1,4 +1,4 @@
-package com.codebutler.android_websockets;
+package com.lisb.android.android_websockets;
 
 import junit.framework.TestCase;
 import android.util.Log;

@@ -1,9 +1,9 @@
 apply plugin: 'com.android.library'
 apply plugin: 'com.github.dcendents.android-maven'
 
-group = 'com.codebutler.android_websockets'
+group = 'com.lisb.android.android_websockets'
 archivesBaseName = 'android_websockets'
-version = '0.0.1-custom-SNAPSHOT'
+version = '1.0.0'
 
 android {
     compileSdkVersion 8
@@ -13,7 +13,7 @@ android {
         minSdkVersion 8
         targetSdkVersion 8
 
-        testApplicationId "com.codebutler.android_websockets.test"
+        testApplicationId "com.lib.android.android_websockets.test"
         testInstrumentationRunner "android.test.InstrumentationTestRunner"
     }
 }
