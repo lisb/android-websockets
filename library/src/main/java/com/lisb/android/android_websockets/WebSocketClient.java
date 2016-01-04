@@ -1,6 +1,13 @@
 package com.lisb.android.android_websockets;
 
-import static java.lang.System.currentTimeMillis;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.text.TextUtils;
+import android.util.Base64;
+import android.util.Log;
+
+import org.apache.http.NameValuePair;
+import org.apache.http.message.BasicNameValuePair;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -10,21 +17,16 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Queue;
 
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 
-import org.apache.http.NameValuePair;
-import org.apache.http.message.BasicNameValuePair;
-
-import android.os.Handler;
-import android.os.HandlerThread;
-import android.text.TextUtils;
-import android.util.Base64;
-import android.util.Log;
+import static java.lang.System.currentTimeMillis;
 
 /**
  * WARN: connection is not reusable. If a connection is closed once, don't call
@@ -33,7 +35,6 @@ import android.util.Log;
 public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
     private static final String THREAD_NAME_WRITE = "websocket-write-thread";
-    private static final long HEARTBEAT_INTERVAL_MARGIN = 10;
 
     private final URI                      mURI;
     private final Listener                 mListener;
@@ -53,10 +54,12 @@ public class WebSocketClient {
     private volatile boolean         mCloseReceived; // modify on websocket read thread. read on websocket read thread and websocket write thread.
     private boolean                  mCloseSent;     // modify on websocket write thread. read on websocket write thread;
 
-    /** access from all thread */
-    private long                     mHeartbeatInterval;
-    private volatile long            mTimestamp; 
-    
+    /** access from all thread. Must lock mHeartbeat. */
+    private long mHeartbeatInterval;
+	private Queue<Long> mPingTimestamps;
+    private long mLastIO;
+	private long mTimeout;
+
     private static volatile TrustManager[] sTrustManagers;
 
     public static void setTrustManagers(TrustManager[] tm) {
@@ -72,6 +75,7 @@ public class WebSocketClient {
         mHandlerThread   = new HandlerThread(THREAD_NAME_WRITE);
         mHandlerThread.start();
         mHandler         = new Handler(mHandlerThread.getLooper());
+		setLastIO();
         open();
     }
 
@@ -126,15 +130,63 @@ public class WebSocketClient {
     
     public void setHeartbeatInterval(long heartbeatInterval) {
     	synchronized (mHeartbeat) {
-    		this.mHeartbeatInterval = heartbeatInterval;
-    		postHeartbeat();
+			this.mHeartbeatInterval = heartbeatInterval;
+			validateTimeoutAndHeartbeatInterval();
+			postHeartbeat();
 		}
 	}
-    
-    void setTimestamp() {
-    	mTimestamp = currentTimeMillis();
+
+	public void setTimeout(long mTimeout) {
+		synchronized (mHeartbeat) {
+			this.mTimeout = mTimeout;
+			validateTimeoutAndHeartbeatInterval();
+			checkTimeout();
+		}
+	}
+
+	void setLastIO() {
+		synchronized (mHeartbeat) {
+			mLastIO = currentTimeMillis();
+		}
     }
-    
+
+	void onPong(final String message) {
+		synchronized (mHeartbeat) {
+			if (mPingTimestamps != null) {
+				mPingTimestamps.remove();
+			}
+		}
+	}
+
+	public boolean checkTimeout() {
+		synchronized (mHeartbeat) {
+			final long now = currentTimeMillis();
+			if (mHeartbeatInterval > 0 && mPingTimestamps != null && !mPingTimestamps.isEmpty()) {
+				final long timestamp = mPingTimestamps.peek();
+				if (now >= timestamp + mHeartbeatInterval) {
+					Log.e(TAG, "Heartbeat is timeout. now:" + now + ", timestamp:" + timestamp
+							+ ", interval:" + mHeartbeatInterval);
+					destroy();
+					return true;
+				}
+			}
+
+			if (mTimeout > 0 && now >= mLastIO + mTimeout) {
+				Log.e(TAG, "IO is timeout. now:" + now + ", lastIO:" + mLastIO + ", timeout:" + mTimeout);
+				destroy();
+				return true;
+			}
+			return false;
+		}
+	}
+
+	void validateTimeoutAndHeartbeatInterval() {
+		if (mHeartbeatInterval > 0 && mTimeout > 0 && mTimeout < mHeartbeatInterval * 2) {
+			Log.e(TAG, "timeout should be twice larger than heartbeat interval.");
+			throw new IllegalArgumentException("timeout should be twice larger than heartbeat interval.");
+		}
+	}
+
     Socket getSocket() {
 		return mSocket;
 	}
@@ -190,7 +242,8 @@ public class WebSocketClient {
                     out.print("\r\n");
                     out.flush();
 
-                    setTimestamp();
+					setLastIO();
+
                     readThread = new WebSocketReadThread(WebSocketClient.this);
                     readThread.start();
 		        } catch (IOException ex) {
@@ -270,6 +323,17 @@ public class WebSocketClient {
     }
     
     public void sendPing(final String message) {
+		synchronized (mHeartbeat) {
+			if (checkTimeout()) {
+				return;
+			}
+
+			if (mPingTimestamps == null) {
+				mPingTimestamps = new LinkedList<Long>();
+			}
+			mPingTimestamps.add(currentTimeMillis());
+		}
+
     	sendFrame(mFrameMarshaller.createPingFrame(message), false);
     }
 
@@ -297,6 +361,10 @@ public class WebSocketClient {
     }
 
     void sendFrameSync(final byte[] frame, final boolean closeFrame) {
+		if (checkTimeout()) {
+			return;
+		}
+
     	try {
         	if (mSocket == null) {
         		Log.e(TAG, "Can't send frame because Socket is closed.");
@@ -317,7 +385,7 @@ public class WebSocketClient {
             outputStream.write(frame);
             outputStream.flush();
 
-            setTimestamp();
+			setLastIO();
         } catch (IOException e) {
             onError(e);
         }
@@ -346,16 +414,10 @@ public class WebSocketClient {
 				if (mHeartbeatInterval <= 0 || !canSendFrame()) {
 					return;
 				}
-				
+
+				sendPing("heartbeat");
 				mHandler.removeCallbacks(this); // 二重で登録してしまわないように削除．
-				final long dx = mTimestamp + mHeartbeatInterval - currentTimeMillis();
-				if (dx < HEARTBEAT_INTERVAL_MARGIN) {
-					sendPing("heartbeat");
-					setTimestamp();
-					mHandler.postDelayed(this, mHeartbeatInterval);
-				} else {
-					mHandler.postDelayed(this, dx);
-				}
+				mHandler.postDelayed(this, mHeartbeatInterval);
 			}
 		}
     	
