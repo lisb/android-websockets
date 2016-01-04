@@ -68,7 +68,7 @@ class FrameHandler {
             if (stream.available() == -1) break;
             switch (mStage) {
                 case 0:
-                	mClient.setTimestamp();
+                	mClient.setLastIO();
                     parseOpcode(stream.readByte());
                     break;
                 case 1:
@@ -183,7 +183,7 @@ class FrameHandler {
 
         } else if (opcode == Frames.OP_PONG) {
             String message = encode(payload);
-            // FIXME: Fire callback...
+            mClient.onPong(message);
             Log.d(TAG, "Got pong! " + message);
         }
     }
