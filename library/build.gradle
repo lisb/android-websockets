@@ -3,7 +3,7 @@ apply plugin: 'com.github.dcendents.android-maven'
 
 group = 'com.lisb.android.android_websockets'
 archivesBaseName = 'android_websockets'
-version = '1.0.0'
+version = '1.1.0-SNAPSHOT'
 
 android {
     compileSdkVersion 8
